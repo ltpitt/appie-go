@@ -31,13 +31,21 @@ func (cmd *orderCommand) Execute(args []string) error {
 		return fmt.Errorf("failed to get orders: %w", err)
 	}
 
-	if len(fulfillments) == 0 {
+	active, err := client.GetOrder(ctx)
+	if err != nil || active.State != activeOrderState {
+		active = nil
+	}
+
+	if len(fulfillments) == 0 && active == nil {
 		fmt.Println("No open orders")
 		return nil
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.AlignRight)
 	fmt.Fprintf(w, "\t%s\t%s\t%s\t%s\t\n", "Order", "Status", "Delivery", "Total")
+	if active != nil {
+		fmt.Fprintf(w, "\t%s\t%s\t%s\t%.2f\t\n", active.ID, active.State, "", active.TotalPrice)
+	}
 	for _, f := range fulfillments {
 		delivery := f.Delivery.Slot.DateDisplay
 		if f.Delivery.Slot.TimeDisplay != "" {
@@ -59,6 +67,10 @@ func findFulfillment(fulfillments []appie.Fulfillment, orderID string) *appie.Fu
 
 // ensureOrderOpen finds the fulfillment for orderID, validates it exists,
 // reopens the order if SUBMITTED/CONFIRMED, and sets the client's active order ID.
+// activeOrderState is the state of an order that is still being assembled
+// (selected delivery slot, not yet confirmed/paid).
+const activeOrderState = "UNCONFIRMED"
+
 func ensureOrderOpen(ctx context.Context, client *appie.Client, fulfillments []appie.Fulfillment, orderID int) error {
 	var found *appie.Fulfillment
 	for i, f := range fulfillments {
@@ -69,6 +81,12 @@ func ensureOrderOpen(ctx context.Context, client *appie.Client, fulfillments []a
 	}
 
 	if found == nil {
+		// An unconfirmed order (the basket) isn't a fulfillment yet, but it is
+		// the active order and can be modified directly.
+		if active, err := client.GetOrder(ctx); err == nil && active.ID == strconv.Itoa(orderID) && active.State == activeOrderState {
+			client.SetOrderID(orderID)
+			return nil
+		}
 		return fmt.Errorf("order %d not found in open orders", orderID)
 	}
 
