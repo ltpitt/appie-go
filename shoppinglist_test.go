@@ -58,15 +58,14 @@ func TestGetShoppingListItems(t *testing.T) {
 
 func TestGetShoppingLists(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/mobile-services/lists/v3/lists" {
+		if r.URL.Path != "/graphql" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 
-		resp := []listResponse{
-			{ID: "abc-123", Description: "Boodschappen", ItemCount: 5},
-			{ID: "def-456", Description: "Weekmenu", ItemCount: 3},
-		}
-		json.NewEncoder(w).Encode(resp)
+		w.Write([]byte(`{"data":{"favoriteListV2":[
+			{"id":"abc-123","description":"Boodschappen","totalSize":5},
+			{"id":"def-456","description":"Weekmenu","totalSize":3}
+		]}}`))
 	}))
 	defer srv.Close()
 

@@ -26,7 +26,7 @@ Base URL: `https://api.ah.nl`
 | | Details by taxonomy | ✅ |
 | | Download invoice (PDF) | ✅ |
 | | Checkout | |
-| **Shopping Lists** | Get lists (v3) | ✅ |
+| **Shopping Lists** | Get lists (GraphQL `favoriteListV2`) | ✅ |
 | | Get items (v2) | ✅ |
 | | Add items (v2 PATCH) | ✅ |
 | | Add to favorite list (GraphQL) | ✅ |
@@ -420,28 +420,11 @@ GET /mobile-services/order/v1/<orderId>/checkout
 
 ## Shopping Lists
 
-### Get All Lists (v3)
+### Get All Lists
 
-```
-GET /mobile-services/lists/v3/lists?productId=<id>
-```
-
-Note: The `productId` parameter is required but returns all lists regardless of value.
-
-**Response:**
-```json
-[
-  {
-    "id": "305e6a50-a970-457b-8831-409f572832d4",
-    "description": "My List",
-    "itemCount": 4,
-    "hasFavoriteProduct": false,
-    "productImages": [
-      [{"width": 80, "height": 80, "url": "https://static.ah.nl/..."}]
-    ]
-  }
-]
-```
+The REST endpoint `GET /mobile-services/lists/v3/lists?productId=<id>` was
+removed by AH (returns 404). Use the `FetchFavoriteLists` GraphQL query instead
+(see below). Passing empty `ids` and `productIds` returns all lists.
 
 ### Add Items to Shopping List (v2)
 

@@ -7,19 +7,6 @@ import (
 	"strings"
 )
 
-// listResponse matches the API response for favorite lists (v3).
-type listResponse struct {
-	ID                 string `json:"id"`
-	Description        string `json:"description"`
-	ItemCount          int    `json:"itemCount"`
-	HasFavoriteProduct bool   `json:"hasFavoriteProduct"`
-	ProductImages      [][]struct {
-		Width  int    `json:"width"`
-		Height int    `json:"height"`
-		URL    string `json:"url"`
-	} `json:"productImages"`
-}
-
 // shoppingListItem is the v2 request body format for adding items.
 type shoppingListItem struct {
 	Description   string `json:"description"`
@@ -31,26 +18,41 @@ type shoppingListItem struct {
 	StrikeThrough bool   `json:"strikeThrough"`
 }
 
-// GetShoppingLists retrieves all favorite lists (v3) for the authenticated user.
-// The API quirk requires a productId parameter, but returns all lists regardless.
-// Pass 0 to use a default product ID (recommended).
-func (c *Client) GetShoppingLists(ctx context.Context, productID int) ([]ShoppingList, error) {
-	if productID <= 0 {
-		productID = 1 // Default product ID - API requires it but returns all lists
-	}
-	path := fmt.Sprintf("/mobile-services/lists/v3/lists?productId=%d", productID)
+// GetShoppingLists retrieves all favorite lists for the authenticated user
+// via the favoriteListV2 GraphQL query. The legacy REST endpoint
+// (/mobile-services/lists/v3/lists) was removed by AH and returns 404.
+// The productID argument is unused and kept for API compatibility.
+func (c *Client) GetShoppingLists(ctx context.Context, _ int) ([]ShoppingList, error) {
+	const query = `query FetchFavoriteLists($ids: [String!]!, $productIds: [Int!]!) {
+  favoriteListV2(ids: $ids, productIds: $productIds) {
+    id
+    description
+    totalSize
+  }
+}`
 
-	var result []listResponse
-	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &result); err != nil {
+	variables := map[string]any{
+		"ids":        []string{},
+		"productIds": []int{},
+	}
+
+	var result struct {
+		FavoriteListV2 []struct {
+			ID          string `json:"id"`
+			Description string `json:"description"`
+			TotalSize   int    `json:"totalSize"`
+		} `json:"favoriteListV2"`
+	}
+	if err := c.DoGraphQL(ctx, query, variables, &result); err != nil {
 		return nil, fmt.Errorf("get shopping lists failed: %w", err)
 	}
 
-	lists := make([]ShoppingList, 0, len(result))
-	for _, r := range result {
+	lists := make([]ShoppingList, 0, len(result.FavoriteListV2))
+	for _, r := range result.FavoriteListV2 {
 		lists = append(lists, ShoppingList{
 			ID:        r.ID,
 			Name:      r.Description,
-			ItemCount: r.ItemCount,
+			ItemCount: r.TotalSize,
 		})
 	}
 
