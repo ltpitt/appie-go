@@ -10,9 +10,12 @@ import (
 )
 
 type shoppingListCommand struct {
-	Show shoppingListShowCommand `command:"show" description:"Show items in a list"`
-	Add  shoppingListAddCommand  `command:"add" description:"Add a product to a list"`
-	Rm   shoppingListRmCommand   `command:"rm" description:"Remove an item from a list"`
+	Show   shoppingListShowCommand   `command:"show" description:"Show items in a list"`
+	Create shoppingListCreateCommand `command:"create" description:"Create a new list"`
+	Delete shoppingListDeleteCommand `command:"delete" description:"Delete a list"`
+	Basket shoppingListBasketCommand `command:"basket" description:"Add all items of a list to the open order (Winkelmandje)"`
+	Add    shoppingListAddCommand    `command:"add" description:"Add a product to a list"`
+	Rm     shoppingListRmCommand     `command:"rm" description:"Remove an item from a list"`
 }
 
 func (cmd *shoppingListCommand) Execute(args []string) error {
@@ -212,5 +215,141 @@ func (cmd *shoppingListRmCommand) Execute(args []string) error {
 	}
 
 	fmt.Printf("Removed %d from %s\n", cmd.Args.ProductID, list.Name)
+	return nil
+}
+
+// create subcommand
+
+type shoppingListCreateCommand struct {
+	Args struct {
+		Name string `positional-arg-name:"name" required:"true"`
+	} `positional-args:"yes"`
+}
+
+func (cmd *shoppingListCreateCommand) Execute(args []string) error {
+	ctx, client, err := orderSetup()
+	if err != nil {
+		return err
+	}
+
+	list, err := client.CreateShoppingList(ctx, cmd.Args.Name)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Created list %s  %s\n", list.ID, list.Name)
+	return nil
+}
+
+// delete subcommand
+
+type shoppingListDeleteCommand struct {
+	Args struct {
+		ListID string `positional-arg-name:"list-id" required:"true"`
+	} `positional-args:"yes"`
+}
+
+func (cmd *shoppingListDeleteCommand) Execute(args []string) error {
+	ctx, client, err := orderSetup()
+	if err != nil {
+		return err
+	}
+
+	lists, err := client.GetShoppingLists(ctx, 0)
+	if err != nil {
+		return fmt.Errorf("failed to get shopping lists: %w", err)
+	}
+
+	list, err := findList(lists, cmd.Args.ListID)
+	if err != nil {
+		return err
+	}
+
+	if err := client.DeleteShoppingList(ctx, list.ID); err != nil {
+		return err
+	}
+
+	fmt.Printf("Deleted list %s\n", list.Name)
+	return nil
+}
+
+// basket subcommand
+
+type shoppingListBasketCommand struct {
+	Args struct {
+		ListID string `positional-arg-name:"list-id" required:"true"`
+	} `positional-args:"yes"`
+}
+
+// mergeQuantities returns the order items needed so that every list item is
+// in the basket with at least its list quantity. Items already in the basket
+// with an equal or higher quantity are left alone, so re-running is safe.
+func mergeQuantities(listItems []appie.ListItem, basket []appie.OrderItem) []appie.OrderItem {
+	have := make(map[int]int, len(basket))
+	for _, b := range basket {
+		have[b.ProductID] += b.Quantity
+	}
+
+	want := make(map[int]int, len(listItems))
+	var order []int
+	for _, li := range listItems {
+		if li.ProductID <= 0 {
+			continue
+		}
+		if _, seen := want[li.ProductID]; !seen {
+			order = append(order, li.ProductID)
+		}
+		want[li.ProductID] += max(li.Quantity, 1)
+	}
+
+	var out []appie.OrderItem
+	for _, id := range order {
+		if want[id] > have[id] {
+			out = append(out, appie.OrderItem{ProductID: id, Quantity: want[id]})
+		}
+	}
+	return out
+}
+
+func (cmd *shoppingListBasketCommand) Execute(args []string) error {
+	ctx, client, err := orderSetup()
+	if err != nil {
+		return err
+	}
+
+	lists, err := client.GetShoppingLists(ctx, 0)
+	if err != nil {
+		return fmt.Errorf("failed to get shopping lists: %w", err)
+	}
+
+	list, err := findList(lists, cmd.Args.ListID)
+	if err != nil {
+		return err
+	}
+
+	basket, err := client.GetOrder(ctx)
+	if err != nil {
+		return fmt.Errorf("no open order (Winkelmandje): %w", err)
+	}
+	if basket.State != activeOrderState {
+		return fmt.Errorf("order %s is %s, refusing to modify it", basket.ID, basket.State)
+	}
+
+	items, err := client.GetShoppingListItems(ctx, list.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get list items: %w", err)
+	}
+
+	toAdd := mergeQuantities(items, basket.Items)
+	if len(toAdd) == 0 {
+		fmt.Printf("Nothing to add: everything in %s is already in order %s\n", list.Name, basket.ID)
+		return nil
+	}
+
+	if err := client.AddToOrder(ctx, toAdd); err != nil {
+		return err
+	}
+
+	fmt.Printf("Added %d products from %s to order %s\n", len(toAdd), list.Name, basket.ID)
 	return nil
 }

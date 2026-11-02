@@ -36,3 +36,21 @@ func TestFindList(t *testing.T) {
 		}
 	})
 }
+
+func TestMergeQuantities(t *testing.T) {
+	listItems := []appie.ListItem{
+		{ProductID: 1, Quantity: 2},
+		{ProductID: 2, Quantity: 1},
+		{ProductID: 3, Quantity: 1},
+		{ProductID: 0, Quantity: 1}, // free-text item, skipped
+	}
+	basket := []appie.OrderItem{
+		{ProductID: 1, Quantity: 2}, // already enough
+		{ProductID: 2, Quantity: 5}, // more than the list wants, never reduced
+	}
+
+	got := mergeQuantities(listItems, basket)
+	if len(got) != 1 || got[0].ProductID != 3 || got[0].Quantity != 1 {
+		t.Fatalf("got %+v, want only product 3 x1", got)
+	}
+}

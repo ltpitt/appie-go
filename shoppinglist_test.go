@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,56 @@ func TestGetShoppingLists(t *testing.T) {
 	}
 	if lists[1].ID != "def-456" {
 		t.Errorf("got ID %q, want %q", lists[1].ID, "def-456")
+	}
+}
+
+func TestCreateAndDeleteShoppingList(t *testing.T) {
+	created := false
+	var deleted string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		switch {
+		case strings.Contains(req.Query, "favoriteListAddV2"):
+			if req.Variables["description"] != "Carbonara" {
+				t.Errorf("unexpected description: %v", req.Variables["description"])
+			}
+			created = true
+			w.Write([]byte(`{"data":{"favoriteListAddV2":{"status":"SUCCESS","errorMessage":null}}}`))
+		case strings.Contains(req.Query, "favoriteListDeleteV2"):
+			deleted, _ = req.Variables["id"].(string)
+			w.Write([]byte(`{"data":{"favoriteListDeleteV2":{"status":"SUCCESS","errorMessage":null}}}`))
+		default:
+			lists := `{"id":"old-1","description":"Old","totalSize":0}`
+			if created {
+				lists += `,{"id":"new-2","description":"Carbonara","totalSize":0}`
+			}
+			w.Write([]byte(`{"data":{"favoriteListV2":[` + lists + `]}}`))
+		}
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL))
+	list, err := client.CreateShoppingList(context.Background(), "Carbonara")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.ID != "new-2" || list.Name != "Carbonara" {
+		t.Errorf("got %+v, want new-2/Carbonara", list)
+	}
+
+	if err := client.DeleteShoppingList(context.Background(), "new-2"); err != nil {
+		t.Fatal(err)
+	}
+	if deleted != "NEW-2" {
+		t.Errorf("deleted %q, want NEW-2", deleted)
+	}
+
+	if _, err := client.CreateShoppingList(context.Background(), "  "); err == nil {
+		t.Error("expected error for empty name")
 	}
 }

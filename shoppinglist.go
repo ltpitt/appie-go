@@ -59,6 +59,79 @@ func (c *Client) GetShoppingLists(ctx context.Context, _ int) ([]ShoppingList, e
 	return lists, nil
 }
 
+// CreateShoppingList creates a new, empty favorite list with the given name
+// and returns it.
+func (c *Client) CreateShoppingList(ctx context.Context, name string) (*ShoppingList, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("list name must not be empty")
+	}
+
+	before, err := c.GetShoppingLists(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	known := make(map[string]bool, len(before))
+	for _, l := range before {
+		known[l.ID] = true
+	}
+
+	const mutation = `mutation AddFavoriteList($description: String!) {
+  favoriteListAddV2(description: $description) {
+    status
+    errorMessage
+  }
+}`
+
+	var result struct {
+		FavoriteListAddV2 struct {
+			Status       string `json:"status"`
+			ErrorMessage string `json:"errorMessage"`
+		} `json:"favoriteListAddV2"`
+	}
+	if err := c.DoGraphQL(ctx, mutation, map[string]any{"description": name}, &result); err != nil {
+		return nil, fmt.Errorf("create shopping list failed: %w", err)
+	}
+	if result.FavoriteListAddV2.Status != "SUCCESS" {
+		return nil, fmt.Errorf("create shopping list failed: %s", result.FavoriteListAddV2.ErrorMessage)
+	}
+
+	// The mutation does not return the new list, so find it by diffing.
+	after, err := c.GetShoppingLists(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	for i, l := range after {
+		if !known[l.ID] {
+			return &after[i], nil
+		}
+	}
+	return nil, fmt.Errorf("list %q was created but could not be found", name)
+}
+
+// DeleteShoppingList deletes a favorite list, including its items.
+func (c *Client) DeleteShoppingList(ctx context.Context, listID string) error {
+	const mutation = `mutation DeleteFavoriteList($id: String!) {
+  favoriteListDeleteV2(id: $id) {
+    status
+    errorMessage
+  }
+}`
+
+	var result struct {
+		FavoriteListDeleteV2 struct {
+			Status       string `json:"status"`
+			ErrorMessage string `json:"errorMessage"`
+		} `json:"favoriteListDeleteV2"`
+	}
+	if err := c.DoGraphQL(ctx, mutation, map[string]any{"id": strings.ToUpper(listID)}, &result); err != nil {
+		return fmt.Errorf("delete shopping list failed: %w", err)
+	}
+	if result.FavoriteListDeleteV2.Status != "SUCCESS" {
+		return fmt.Errorf("delete shopping list failed: %s", result.FavoriteListDeleteV2.ErrorMessage)
+	}
+	return nil
+}
+
 // GetShoppingListItems retrieves all items for a specific list (v2 GraphQL).
 func (c *Client) GetShoppingListItems(ctx context.Context, listID string) ([]ListItem, error) {
 	const query = `query FavoriteListV2($ids: [String!]!) {
