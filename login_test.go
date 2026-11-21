@@ -97,6 +97,24 @@ func TestLoginRewritesBody(t *testing.T) {
 	}
 }
 
+func TestLoginRewritesRSCBody(t *testing.T) {
+	body := `0:["$","$L1",null,{"url":"appie://login-exit?code=abc123"}]`
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": {"text/x-component"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	if err := rewriteLoginResponse(resp, "http://127.0.0.1:9999", "login.ah.nl"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(result), "appie://") {
+		t.Errorf("body still contains appie:// : %s", result)
+	}
+}
+
 func TestLoginRewritesLocationHeader(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: 302,

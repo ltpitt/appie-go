@@ -133,7 +133,8 @@ func rewriteLoginResponse(resp *http.Response, localOrigin, targetHost string) e
 
 	// Only rewrite text response bodies
 	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(ct, "text/html") && !strings.Contains(ct, "javascript") && !strings.Contains(ct, "json") {
+	// text/x-component is the Next.js RSC payload; /login/ingelogd embeds the appie:// redirect there.
+	if !strings.Contains(ct, "text/html") && !strings.Contains(ct, "javascript") && !strings.Contains(ct, "json") && !strings.Contains(ct, "x-component") {
 		return nil
 	}
 
