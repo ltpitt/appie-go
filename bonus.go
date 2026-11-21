@@ -63,7 +63,7 @@ func (bg *bonusGroupResponse) toProduct() Product {
 	}
 }
 
-// getBonusMetadata retrieves the list of valid bonus category names from the current period.
+// getBonusMetadata retrieves the list of valid bonus category names across all advertised periods.
 func (c *Client) getBonusMetadata(ctx context.Context) ([]string, error) {
 	path := "/mobile-services/bonuspage/v3/metadata"
 
@@ -72,11 +72,13 @@ func (c *Client) getBonusMetadata(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("get bonus metadata failed: %w", err)
 	}
 
+	seen := make(map[string]bool)
 	var categories []string
 	for _, period := range result.Periods {
 		for _, tab := range period.Tabs {
 			for _, meta := range tab.URLMetadataList {
-				if meta.BonusType == "NATIONAL" {
+				if meta.BonusType == "NATIONAL" && !seen[meta.Description] {
+					seen[meta.Description] = true
 					categories = append(categories, meta.Description)
 				}
 			}
@@ -85,11 +87,11 @@ func (c *Client) getBonusMetadata(ctx context.Context) ([]string, error) {
 	return categories, nil
 }
 
-// getBonusSection retrieves bonus products for a single category.
-func (c *Client) getBonusSection(ctx context.Context, category string) ([]Product, error) {
+// getBonusSection retrieves bonus products for a single category on the given date.
+func (c *Client) getBonusSection(ctx context.Context, category string, date time.Time) ([]Product, error) {
 	params := url.Values{}
 	params.Set("application", c.application)
-	params.Set("date", time.Now().Format("2006-01-02"))
+	params.Set("date", date.Format("2006-01-02"))
 	params.Set("promotionType", "NATIONAL")
 	params.Set("category", category)
 
@@ -107,6 +109,13 @@ func (c *Client) getBonusSection(ctx context.Context, category string) ([]Produc
 // across all categories. Results are deduplicated by product title (since
 // group-level bonus entries have no product ID).
 func (c *Client) GetBonusProducts(ctx context.Context) ([]Product, error) {
+	return c.GetBonusProductsOn(ctx, time.Now())
+}
+
+// GetBonusProductsOn is GetBonusProducts for the bonus week containing date.
+// Pass the StartDate of the second GetBonusPeriods entry to read next week's
+// bonus once AH has published it.
+func (c *Client) GetBonusProductsOn(ctx context.Context, date time.Time) ([]Product, error) {
 	categories, err := c.getBonusMetadata(ctx)
 	if err != nil {
 		return nil, err
@@ -116,7 +125,7 @@ func (c *Client) GetBonusProducts(ctx context.Context) ([]Product, error) {
 	var products []Product
 
 	for _, category := range categories {
-		catProducts, err := c.getBonusSection(ctx, category)
+		catProducts, err := c.getBonusSection(ctx, category, date)
 		if err != nil {
 			return nil, err
 		}

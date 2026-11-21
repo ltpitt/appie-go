@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // personalBonusJSON is an anonymized sample of the
@@ -149,5 +150,42 @@ func TestGetBonusPeriods(t *testing.T) {
 	}
 	if periods[1].StartDate != "2026-07-13" || periods[1].EndDate != "2026-07-19" {
 		t.Errorf("unexpected next-week period: %+v", periods[1])
+	}
+}
+
+func TestGetBonusProductsOnUsesDateAndDedupesCategories(t *testing.T) {
+	const metaJSON = `{"periods":[
+	  {"bonusStartDate":"2026-11-16","bonusEndDate":"2026-11-22","tabs":[{"urlMetadataList":[{"bonusType":"NATIONAL","description":"Groente"}]}]},
+	  {"bonusStartDate":"2026-11-23","bonusEndDate":"2026-11-29","tabs":[{"urlMetadataList":[{"bonusType":"NATIONAL","description":"Groente"}]}]}
+	]}`
+	const sectionJSON = `{"sectionType":"NATIONAL","bonusGroupOrProducts":[{"product":{"webshopId":1,"title":"Sla","currentPrice":1,"isBonus":true}}]}`
+
+	var sectionDates []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/mobile-services/bonuspage/v3/metadata":
+			w.Write([]byte(metaJSON))
+		case "/mobile-services/bonuspage/v2/section":
+			sectionDates = append(sectionDates, r.URL.Query().Get("date"))
+			w.Write([]byte(sectionJSON))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := New(WithBaseURL(server.URL))
+	client.accessToken = "test"
+
+	next := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	products, err := client.GetBonusProductsOn(context.Background(), next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sectionDates) != 1 || sectionDates[0] != "2026-11-23" {
+		t.Errorf("expected one section call for 2026-11-23 (category listed in both periods), got %v", sectionDates)
+	}
+	if len(products) != 1 || products[0].Title != "Sla" {
+		t.Errorf("unexpected products: %+v", products)
 	}
 }
